@@ -37,26 +37,36 @@ class FlexibleThresholdedLoss(nn.Module):
         if self.use_mse_threshold:
             if self.mse_threshold is None:
                 self.mse_threshold = mse_loss  # Set adaptive threshold based on MSE
-            mse_thresholded_diff = torch.where(pixel_diff_squared < self.mse_threshold, torch.tensor(0.0, device=pixel_diff.device), pixel_diff_squared)
-            mse_thresholded_loss = mse_thresholded_diff  # L2 (MSE) part for pixels exceeding MSE threshold
+            mse_thresholded_diff = pixel_diff_squared[pixel_diff_squared >= self.mse_threshold]  # Only keep pixels above threshold
+
+            # Avoid division by zero when no values are above the threshold
+            if mse_thresholded_diff.numel() > 0:
+                mse_thresholded_loss = mse_thresholded_diff.mean()  # Mean of only the values above threshold
+            else:
+                mse_thresholded_loss = torch.tensor(0.0, device=pixel_diff.device)
         else:
             # No thresholding, use all squared differences for L2 (MSE)
-            mse_thresholded_loss = pixel_diff_squared
+            mse_thresholded_loss = pixel_diff_squared.mean()
 
         # Part 2: L1-based threshold handling
         mae_loss = pixel_diff.mean()  # L1 (absolute difference) loss
         if self.use_mae_threshold:
             if self.mae_threshold is None:
                 self.mae_threshold = mae_loss  # Set adaptive threshold based on MAE
-            mae_thresholded_diff = torch.where(pixel_diff < self.mae_threshold, torch.tensor(0.0, device=pixel_diff.device), pixel_diff)
-            mae_thresholded_loss = mae_thresholded_diff  # L1 part for pixels exceeding MAE threshold
+            mae_thresholded_diff = pixel_diff[pixel_diff >= self.mae_threshold]  # Only keep pixels above threshold
+
+            # Avoid division by zero when no values are above the threshold
+            if mae_thresholded_diff.numel() > 0:
+                mae_thresholded_loss = mae_thresholded_diff.mean()  # Mean of only the values above threshold
+            else:
+                mae_thresholded_loss = torch.tensor(0.0, device=pixel_diff.device)
         else:
             # No thresholding, use all absolute differences for L1
-            mae_thresholded_loss = pixel_diff
+            mae_thresholded_loss = pixel_diff.mean()
 
         # Part 3: Non-thresholded loss (all differences are considered for both L1 and L2)
-        non_thresholded_l1_loss = pixel_diff  # L1 part without threshold
-        non_thresholded_l2_loss = pixel_diff_squared  # L2 (MSE) part without threshold
+        non_thresholded_l1_loss = pixel_diff.mean()  # L1 part without threshold
+        non_thresholded_l2_loss = pixel_diff_squared.mean()  # L2 (MSE) part without threshold
 
         # Combine thresholded L1 and L2 losses
         combined_thresholded_loss = self.l1_weight * mae_thresholded_loss + self.l2_weight * mse_thresholded_loss
