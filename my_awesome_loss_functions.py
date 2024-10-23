@@ -1,10 +1,11 @@
 import torch
 import torch.nn as nn
 
-# Enhanced loss with optional thresholding for MSE and MAE
+# Enhanced loss with optional thresholding and clipping for MSE and MAE
 class FlexibleThresholdedLoss(nn.Module):
     def __init__(self, use_mse_threshold=True, use_mae_threshold=True, mse_threshold=None, mae_threshold=None, 
-                 reduction='mean', l1_weight=0.5, l2_weight=0.5, threshold_weight=0.5, non_threshold_weight=0.5):
+                 reduction='mean', l1_weight=0.5, l2_weight=0.5, threshold_weight=0.5, non_threshold_weight=0.5,
+                 mse_clip_ratio=None, mae_clip_ratio=None):
         """
         use_mse_threshold: Whether to apply a threshold to MSE-based loss.
         use_mae_threshold: Whether to apply a threshold to MAE-based loss.
@@ -15,6 +16,8 @@ class FlexibleThresholdedLoss(nn.Module):
         l2_weight: The weight for L2 loss in both thresholded and non-thresholded parts.
         threshold_weight: Weight for the thresholded loss part.
         non_threshold_weight: Weight for the non-thresholded loss part.
+        mse_clip_ratio: Clip the MSE-based thresholded loss when it exceeds this ratio of the current MSE threshold. If None, no clipping is applied.
+        mae_clip_ratio: Clip the MAE-based thresholded loss when it exceeds this ratio of the current MAE threshold. If None, no clipping is applied.
         """
         super(FlexibleThresholdedLoss, self).__init__()
         self.use_mse_threshold = use_mse_threshold
@@ -26,6 +29,8 @@ class FlexibleThresholdedLoss(nn.Module):
         self.l2_weight = l2_weight
         self.threshold_weight = threshold_weight
         self.non_threshold_weight = non_threshold_weight
+        self.mse_clip_ratio = mse_clip_ratio
+        self.mae_clip_ratio = mae_clip_ratio
 
     def forward(self, input_img, target_img):
         # Calculate pixel-wise absolute difference
@@ -39,8 +44,13 @@ class FlexibleThresholdedLoss(nn.Module):
             mse_thresholded_diff = torch.where(pixel_diff < self.mse_threshold, torch.tensor(0.0, device=pixel_diff.device), pixel_diff)
             mse_thresholded_l1_loss = mse_thresholded_diff  # L1 part for MSE-thresholded differences
             mse_thresholded_l2_loss = mse_thresholded_diff ** 2  # L2 part for MSE-thresholded differences
+
+            # Apply clipping if mse_clip_ratio is provided
+            if self.mse_clip_ratio is not None:
+                max_mse_loss = self.mse_clip_ratio * self.mse_threshold
+                mse_thresholded_l1_loss = torch.clamp(mse_thresholded_l1_loss, max=max_mse_loss)
+                mse_thresholded_l2_loss = torch.clamp(mse_thresholded_l2_loss, max=max_mse_loss)
         else:
-            # No thresholding, consider all differences for MSE
             mse_thresholded_l1_loss = pixel_diff
             mse_thresholded_l2_loss = pixel_diff ** 2
 
@@ -52,8 +62,13 @@ class FlexibleThresholdedLoss(nn.Module):
             mae_thresholded_diff = torch.where(pixel_diff < self.mae_threshold, torch.tensor(0.0, device=pixel_diff.device), pixel_diff)
             mae_thresholded_l1_loss = mae_thresholded_diff  # L1 part for MAE-thresholded differences
             mae_thresholded_l2_loss = mae_thresholded_diff ** 2  # L2 part for MAE-thresholded differences
+
+            # Apply clipping if mae_clip_ratio is provided
+            if self.mae_clip_ratio is not None:
+                max_mae_loss = self.mae_clip_ratio * self.mae_threshold
+                mae_thresholded_l1_loss = torch.clamp(mae_thresholded_l1_loss, max=max_mae_loss)
+                mae_thresholded_l2_loss = torch.clamp(mae_thresholded_l2_loss, max=max_mae_loss)
         else:
-            # No thresholding, consider all differences for MAE
             mae_thresholded_l1_loss = pixel_diff
             mae_thresholded_l2_loss = pixel_diff ** 2
 
@@ -89,9 +104,9 @@ if __name__ == "__main__":
     gen_img = torch.rand((1, 3, 256, 256))  # Generated image
     target_img = torch.rand((1, 3, 256, 256))  # Target image
 
-    # Instantiate the flexible thresholded loss with options to enable or disable thresholds
-    loss_fn = FlexibleThresholdedLoss(use_mse_threshold=True, use_mae_threshold=False, reduction='mean', l1_weight=0.5, l2_weight=0.5, threshold_weight=0.7, non_threshold_weight=0.3)
+    # Instantiate the flexible thresholded loss with separate clipping ratios for MSE and MAE
+    loss_fn = FlexibleThresholdedLoss(use_mse_threshold=True, use_mae_threshold=True, reduction='mean', l1_weight=0.5, l2_weight=0.5, threshold_weight=0.7, non_threshold_weight=0.3, mse_clip_ratio=2.0, mae_clip_ratio=1.5)
 
     # Calculate the loss
     loss = loss_fn(gen_img, target_img)
-    print(f"Flexible Thresholded MSE & MAE Loss: {loss.item()}")
+    print(f"Flexible Thresholded and Clipped MSE & MAE Loss: {loss.item()}")
